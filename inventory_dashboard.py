@@ -15,16 +15,12 @@ def get_data_from_google_sheet():
     ]
     
     # 從 Streamlit Secrets 中讀取認證資訊
-    try:
-        creds_json = st.secrets["gcp_service_account"]["credentials"]
-        creds_info = json.loads(creds_json)  # 將 JSON 字串轉為字典
-        creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
-    except KeyError as e:
-        st.error(f"無法從 Streamlit Secrets 中讀取認證資訊：{str(e)}。請檢查 Secrets 是否正確設置。")
-        st.stop()
-    except json.JSONDecodeError as e:
-        st.error(f"Streamlit Secrets 中的認證資訊格式錯誤：{str(e)}。請確認 JSON 格式是否正確。")
-        st.stop()
+try:
+    creds_info = st.secrets["gcp_service_account"]  # 直接讀取字典
+    creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
+except KeyError as e:
+    st.error(f"無法從 Streamlit Secrets 中讀取認證資訊：{str(e)}。請檢查 Secrets 是否正確設置。")
+    st.stop()
 
     client = gspread.authorize(creds)
     sheet = client.open("INVENTORY_API")  # 確認你的 Google Sheet 名稱
