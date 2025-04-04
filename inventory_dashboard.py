@@ -12,7 +12,7 @@ def get_data_from_google_sheet():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
+    creds = Credentials.from_service_account_file("gcp_service_account", scopes=scopes)
     client = gspread.authorize(creds)
     sheet = client.open("INVENTORY_API")  # 確認你的 Google Sheet 名稱
 
