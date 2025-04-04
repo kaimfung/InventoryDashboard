@@ -5,6 +5,7 @@ from google.oauth2.service_account import Credentials
 import numpy as np
 from datetime import datetime
 import base64  # 用於生成下載連結
+import json
 
 # 連接到 Google Sheet
 def get_data_from_google_sheet():
@@ -12,7 +13,19 @@ def get_data_from_google_sheet():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    creds = Credentials.from_service_account_file("gcp_service_account", scopes=scopes)
+    
+    # 從 Streamlit Secrets 中讀取認證資訊
+    try:
+        creds_json = st.secrets["gcp_service_account"]["credentials"]
+        creds_info = json.loads(creds_json)  # 將 JSON 字串轉為字典
+        creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
+    except KeyError as e:
+        st.error(f"無法從 Streamlit Secrets 中讀取認證資訊：{str(e)}。請檢查 Secrets 是否正確設置。")
+        st.stop()
+    except json.JSONDecodeError as e:
+        st.error(f"Streamlit Secrets 中的認證資訊格式錯誤：{str(e)}。請確認 JSON 格式是否正確。")
+        st.stop()
+
     client = gspread.authorize(creds)
     sheet = client.open("INVENTORY_API")  # 確認你的 Google Sheet 名稱
 
@@ -142,7 +155,7 @@ st.title("倉庫庫存查詢與缺貨提醒")
 try:
     dataframes, update_dates, sorted_weeks = get_data_from_google_sheet()
 except Exception as e:
-    st.error(f"無法連接到 Google Sheet：{str(e)}")
+    st.error(f"無法連接到 Google Sheet：{str(e)}。請檢查 Secrets 設置或 Google Sheet 存取權限。")
     st.stop()
 
 df_week1 = dataframes["week 1"]
@@ -307,7 +320,7 @@ if not low_stock.empty:
     else:
         st.warning("以下產品庫存不足（低於上週用量）：")
         # 使用 HTML 渲染表格
-        usage_threshold = low_stock_df["Last Week Usage"].mean()
+        usage W_threshold = low_stock_df["Last Week Usage"].mean()
         html_table = df_to_html_table(low_stock, update_dates, sorted_weeks, usage_threshold, is_low_stock=True)
         st.markdown(html_table, unsafe_allow_html=True)
 
