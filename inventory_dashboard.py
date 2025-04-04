@@ -320,7 +320,7 @@ if not low_stock.empty:
     else:
         st.warning("以下產品庫存不足（低於上週用量）：")
         # 使用 HTML 渲染表格
-        usage W_threshold = low_stock_df["Last Week Usage"].mean()
+        usage_threshold = low_stock_df["Last Week Usage"].mean()
         html_table = df_to_html_table(low_stock, update_dates, sorted_weeks, usage_threshold, is_low_stock=True)
         st.markdown(html_table, unsafe_allow_html=True)
 
