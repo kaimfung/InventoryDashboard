@@ -4,9 +4,18 @@ from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 import base64  # 添加 base64 模組
 
+import streamlit as st
+from google.oauth2.service_account import Credentials
+import gspread
+
 # 設定 Google Sheet 認證
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+
+# 從 Streamlit Secrets 讀取認證資訊
+creds_dict = st.secrets["gcp_service_account"]
+
+# 使用字典創建認證物件
+creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
 client = gspread.authorize(creds)
 
 # 連接到 Google Sheet
