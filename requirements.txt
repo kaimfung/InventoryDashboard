@@ -2,4 +2,3 @@ streamlit
 gspread>=5.7.0
 google-auth>=2.15.0
 pandas
-base64
