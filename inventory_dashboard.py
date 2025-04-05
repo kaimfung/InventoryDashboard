@@ -1,30 +1,19 @@
 import streamlit as st
-import pandas as pd
 import gspread
-from google.oauth2.service_account import Credentials
-import numpy as np
-from datetime import datetime
-import base64  # 用於生成下載連結
-import json
+from oauth2client.service_account import ServiceAccountCredentials
+import pandas as pd
+import base64  # 添加 base64 模組
+
+# 設定 Google Sheet 認證
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+client = gspread.authorize(creds)
 
 # 連接到 Google Sheet
+sheet = client.open("INVENTORY_API")
+
+# 從 Google Sheet 讀取數據
 def get_data_from_google_sheet():
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    
-    # 從 Streamlit Secrets 中讀取認證資訊
-    try:
-        creds_info = st.secrets["gcp_service_account"]  # 直接讀取字典
-        creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
-    except KeyError as e:
-        st.error(f"無法從 Streamlit Secrets 中讀取認證資訊：{str(e)}。請檢查 Secrets 是否正確設置。")
-        st.stop()
-
-    client = gspread.authorize(creds)
-    sheet = client.open("INVENTORY_API")  # 確認你的 Google Sheet 名稱
-
     # 讀取所有工作表的數據
     weeks = ["week 1", "week 2", "week 3", "week 4", "week 5"]
     dataframes = {}
@@ -332,4 +321,3 @@ if not low_stock.empty:
         st.markdown(get_table_download_link(low_stock, "low_stock_result.csv"), unsafe_allow_html=True)
 else:
     st.success("目前無缺貨產品！")
-
