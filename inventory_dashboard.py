@@ -1,25 +1,40 @@
 import streamlit as st
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-import pandas as pd
-import base64  # 添加 base64 模組
-
-import streamlit as st
 from google.oauth2.service_account import Credentials
-import gspread
+import pandas as pd
+import base64
 
 # 設定 Google Sheet 認證
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
-# 從 Streamlit Secrets 讀取認證資訊
-creds_dict = st.secrets["gcp_service_account"]
+try:
+    # 從 Streamlit Secrets 讀取認證資訊
+    creds_dict = st.secrets["gcp_service_account"]
 
-# 使用字典創建認證物件
-creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
-client = gspread.authorize(creds)
+    # 檢查必要的鍵是否存在
+    required_keys = ["type", "project_id", "private_key_id", "private_key", "client_email", "client_id", "auth_uri", "token_uri", "auth_provider_x509_cert_url", "client_x509_cert_url"]
+    missing_keys = [key for key in required_keys if key not in creds_dict]
+    if missing_keys:
+        st.error(f"Streamlit Secrets 中缺少以下必要的鍵：{missing_keys}")
+        st.stop()
+
+    # 使用字典創建認證物件
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+    client = gspread.authorize(creds)
+
+except Exception as e:
+    st.error(f"無法初始化 Google Sheet 認證：{str(e)}。請檢查 Streamlit Secrets 設置。")
+    st.stop()
 
 # 連接到 Google Sheet
-sheet = client.open("INVENTORY_API")
+try:
+    sheet = client.open("INVENTORY_API")
+except gspread.exceptions.SpreadsheetNotFound:
+    st.error("找不到 Google Sheet 'INVENTORY_API'。請確認名稱是否正確，並確保已與服務帳戶共用。")
+    st.stop()
+except Exception as e:
+    st.error(f"無法連接到 Google Sheet：{str(e)}。請檢查 Google Sheet 存取權限或 Secrets 設置。")
+    st.stop()
 
 # 從 Google Sheet 讀取數據
 def get_data_from_google_sheet():
@@ -153,7 +168,7 @@ st.title("倉庫庫存查詢與缺貨提醒")
 try:
     dataframes, update_dates, sorted_weeks = get_data_from_google_sheet()
 except Exception as e:
-    st.error(f"無法連接到 Google Sheet：{str(e)}。請檢查 Secrets 設置或 Google Sheet 存取權限。")
+    st.error(f"無法從 Google Sheet 讀取數據：{str(e)}。請檢查工作表名稱或權限設置。")
     st.stop()
 
 df_week1 = dataframes["week 1"]
