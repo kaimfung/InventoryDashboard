@@ -15,12 +15,12 @@ def get_data_from_google_sheet():
     ]
     
     # 從 Streamlit Secrets 中讀取認證資訊
-try:
-    creds_info = st.secrets["gcp_service_account"]  # 直接讀取字典
-    creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
-except KeyError as e:
-    st.error(f"無法從 Streamlit Secrets 中讀取認證資訊：{str(e)}。請檢查 Secrets 是否正確設置。")
-    st.stop()
+    try:
+        creds_info = st.secrets["gcp_service_account"]  # 直接讀取字典
+        creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
+    except KeyError as e:
+        st.error(f"無法從 Streamlit Secrets 中讀取認證資訊：{str(e)}。請檢查 Secrets 是否正確設置。")
+        st.stop()
 
     client = gspread.authorize(creds)
     sheet = client.open("INVENTORY_API")  # 確認你的 Google Sheet 名稱
@@ -31,7 +31,11 @@ except KeyError as e:
     update_dates = {}
 
     for week in weeks:
-        worksheet = sheet.worksheet(week)
+        try:
+            worksheet = sheet.worksheet(week)
+        except gspread.exceptions.WorksheetNotFound:
+            st.error(f"找不到工作表 '{week}'。請確認 Google Sheet 中是否存在該工作表。")
+            st.stop()
         data = worksheet.get_all_records()
         df = pd.DataFrame(data)
         # 確保欄位名稱一致
@@ -328,3 +332,4 @@ if not low_stock.empty:
         st.markdown(get_table_download_link(low_stock, "low_stock_result.csv"), unsafe_allow_html=True)
 else:
     st.success("目前無缺貨產品！")
+
