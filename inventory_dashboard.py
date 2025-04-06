@@ -73,18 +73,14 @@ def get_data_from_google_sheet():
     return dataframes, update_dates, sorted_weeks
 
 # 將 DataFrame 轉為 HTML 表格，並應用樣式
-def df_to_html_table(df, update_dates, sorted_weeks, usage_threshold=None, is_low_stock=False):
+def df_to_html_table(df, update_dates, sorted_weeks, last_week_usage=None, is_low_stock=False):
     # 獲取日期欄位和變化欄位
     date_columns = [update_dates[week] for week in sorted_weeks]
     change_columns = [col for col in df.columns if "-" in col]
 
-    # 格式化數字，保留 2 位小數，並調整變化欄位的顯示方式
+    # 格式化數字，保留 2 位小數
     for col in date_columns + change_columns:
-        if col in change_columns:
-            # 調整顯示方式：正數加負號，負數去負號
-            df[col] = df[col].apply(lambda x: f"{-x:.2f}" if x > 0 else f"{abs(x):.2f}" if x < 0 else "0.00")
-        else:
-            df[col] = df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
+        df[col] = df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
 
     # 開始構建 HTML 表格
     html = """
@@ -124,7 +120,7 @@ def df_to_html_table(df, update_dates, sorted_weeks, usage_threshold=None, is_lo
     html += "</tr></thead><tbody>"
 
     # 添加數據行
-    for _, row in df.iterrows():
+    for idx, (_, row) in enumerate(df.iterrows()):
         html += "<tr>"
         for col in df.columns:
             value = row[col]
@@ -135,21 +131,24 @@ def df_to_html_table(df, update_dates, sorted_weeks, usage_threshold=None, is_lo
                 style = 'background-color: #e6f3ff; color: #000000;'
                 if is_low_stock and col == update_dates["week 1"]:
                     week1_stock = float(row[update_dates["week 1"]]) if row[update_dates["week 1"]] != "N/A" else float('inf')
+                    # 使用該產品自己的用量作為閾值
+                    usage_threshold = last_week_usage.iloc[idx] if last_week_usage is not None else float('inf')
                     if pd.notna(usage_threshold) and week1_stock < usage_threshold:
                         style = 'background-color: #ffcccc; color: #000000;'
-            # 為變化欄位設置樣式（正數紅色，負數綠色）
+            # 為變化欄位設置樣式
             elif col in change_columns:
                 try:
-                    # 由於顯示時正負已反轉，這裡需要根據顯示值判斷
-                    # 顯示為正數（原始值為負數） -> 綠色
-                    # 顯示為負數（原始值為正數） -> 紅色
-                    display_value = float(value) if value != "N/A" else 0
-                    if display_value > 0:  # 顯示為正數（原始為負數）
-                        style = 'background-color: #ccffcc; color: #000000;'
-                    elif display_value < 0:  # 顯示為負數（原始為正數）
-                        style = 'background-color: #ffcccc; color: #000000;'
+                    value_float = float(value) if value != "N/A" else 0
+                    # 調整顯示值：正數加負號，負數去負號
+                    display_value = f"-{abs(value_float):.2f}" if value_float > 0 else f"{abs(value_float):.2f}"
+                    # 設置背景色：正數紅色，負數綠色
+                    if value_float > 0:
+                        style = 'background-color: #ffcccc; color: #000000;'  # 紅色
+                    elif value_float < 0:
+                        style = 'background-color: #ccffcc; color: #000000;'  # 綠色
                     else:
-                        style = 'background-color: #ffffff; color: #000000;'
+                        style = 'background-color: #ffffff; color: #000000;'  # 白色
+                    value = display_value
                 except:
                     style = 'background-color: #ffffff; color: #000000;'
             else:
@@ -281,7 +280,7 @@ for i in range(len(sorted_weeks) - 1):
     low_stock_df[date_to] = pd.to_numeric(low_stock_df[date_to], errors="coerce")
     # 計算變化（前一週減後一週）
     change_column_name = f"{date_to.split('/')[0]}/{date_to.split('/')[1]}-{date_from.split('/')[0]}/{date_from.split('/')[1]}"
-    low_stock_df[change_column_name] = low_stock_df[date_to] - low_stock_df[date_from]
+    low_stock_df[change_column_name] = low_stock_df[date_to] - result_df[date_from]
 
 # 確保變化欄位也是數值型
 for col in low_stock_df.columns:
@@ -293,7 +292,7 @@ last_week = "week 2"  # 因為 sorted_weeks 現在是 ["week 1", "week 2", ..., 
 week1_date = update_dates["week 1"]
 last_week_date = update_dates[last_week]
 usage_column = f"{last_week_date.split('/')[0]}/{last_week_date.split('/')[1]}-{week1_date.split('/')[0]}/{week1_date.split('/')[1]}"
-# 用量 = 24/3-31/3，如果 > 0 則為用量，否則為 0
+# 用量 = 24/3-17/3，如果 > 0 則為用量，否則為 0
 low_stock_df["Last Week Usage"] = low_stock_df[usage_column].apply(lambda x: x if x > 0 else 0)
 
 # 篩選 week 1 庫存低於用量的產品
@@ -304,7 +303,7 @@ low_stock_df["Last Week Usage"] = low_stock_df["Last Week Usage"].fillna(0)
 # 篩選條件：week 1 庫存量 < 用量
 low_stock = low_stock_df[low_stock_df[update_dates["week 1"]] < low_stock_df["Last Week Usage"]]
 
-# 移除「Last Week Usage」欄
+# 移除 Last Week Usage 欄位
 low_stock = low_stock.drop(columns=["Last Week Usage"])
 
 # 添加搜尋功能
@@ -322,15 +321,10 @@ if not low_stock.empty:
             low_stock["Brand"].str.contains(low_stock_search_term, case=False, na=False) |
             low_stock["Desc"].str.contains(low_stock_search_term, case=False, na=False)
         ]
-        # 移除「Last Week Usage」欄（如果存在）
-        if "Last Week Usage" in filtered_low_stock.columns:
-            filtered_low_stock = filtered_low_stock.drop(columns=["Last Week Usage"])
-
         if not filtered_low_stock.empty:
             st.warning("以下產品庫存不足（低於上週用量）：")
             # 使用 HTML 渲染表格
-            usage_threshold = low_stock_df["Last Week Usage"].mean()
-            html_table = df_to_html_table(filtered_low_stock, update_dates, sorted_weeks, usage_threshold, is_low_stock=True)
+            html_table = df_to_html_table(filtered_low_stock, update_dates, sorted_weeks, last_week_usage=low_stock_df["Last Week Usage"].reindex(filtered_low_stock.index), is_low_stock=True)
             st.markdown(html_table, unsafe_allow_html=True)
 
             # 添加交互式表格（支援放大、排序等）
@@ -344,8 +338,7 @@ if not low_stock.empty:
     else:
         st.warning("以下產品庫存不足（低於上週用量）：")
         # 使用 HTML 渲染表格
-        usage_threshold = low_stock_df["Last Week Usage"].mean()
-        html_table = df_to_html_table(low_stock, update_dates, sorted_weeks, usage_threshold, is_low_stock=True)
+        html_table = df_to_html_table(low_stock, update_dates, sorted_weeks, last_week_usage=low_stock_df["Last Week Usage"].reindex(low_stock.index), is_low_stock=True)
         st.markdown(html_table, unsafe_allow_html=True)
 
         # 添加交互式表格（支援放大、排序等）
