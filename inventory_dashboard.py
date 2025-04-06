@@ -280,7 +280,7 @@ for i in range(len(sorted_weeks) - 1):
     low_stock_df[date_to] = pd.to_numeric(low_stock_df[date_to], errors="coerce")
     # 計算變化（前一週減後一週）
     change_column_name = f"{date_to.split('/')[0]}/{date_to.split('/')[1]}-{date_from.split('/')[0]}/{date_from.split('/')[1]}"
-    low_stock_df[change_column_name] = low_stock_df[date_to] - result_df[date_from]
+    low_stock_df[change_column_name] = low_stock_df[date_to] - low_stock_df[date_from]  # 修正：使用 low_stock_df 而非 result_df
 
 # 確保變化欄位也是數值型
 for col in low_stock_df.columns:
