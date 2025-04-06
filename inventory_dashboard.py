@@ -73,7 +73,7 @@ def get_data_from_google_sheet():
     return dataframes, update_dates, sorted_weeks
 
 # 將 DataFrame 轉為 HTML 表格，並應用樣式
-def df_to_html_table(df, update_dates, sorted_weeks, usage_threshold=None, is_low_stock=False):
+def df_to_html_table(df, update_dates, sorted_weeks, last_week_usage=None, is_low_stock=False):
     # 獲取日期欄位和變化欄位
     date_columns = [update_dates[week] for week in sorted_weeks]
     change_columns = [col for col in df.columns if "-" in col]
@@ -120,7 +120,7 @@ def df_to_html_table(df, update_dates, sorted_weeks, usage_threshold=None, is_lo
     html += "</tr></thead><tbody>"
 
     # 添加數據行
-    for _, row in df.iterrows():
+    for idx, (_, row) in enumerate(df.iterrows()):
         html += "<tr>"
         for col in df.columns:
             value = row[col]
@@ -131,6 +131,8 @@ def df_to_html_table(df, update_dates, sorted_weeks, usage_threshold=None, is_lo
                 style = 'background-color: #e6f3ff; color: #000000;'
                 if is_low_stock and col == update_dates["week 1"]:
                     week1_stock = float(row[update_dates["week 1"]]) if row[update_dates["week 1"]] != "N/A" else float('inf')
+                    # 使用該產品自己的用量作為閾值
+                    usage_threshold = last_week_usage.iloc[idx] if last_week_usage is not None else float('inf')
                     if pd.notna(usage_threshold) and week1_stock < usage_threshold:
                         style = 'background-color: #ffcccc; color: #000000;'
             # 為變化欄位設置樣式
@@ -145,6 +147,9 @@ def df_to_html_table(df, update_dates, sorted_weeks, usage_threshold=None, is_lo
                         style = 'background-color: #ffffff; color: #000000;'
                 except:
                     style = 'background-color: #ffffff; color: #000000;'
+            # 為 Last Week Usage 欄位設置樣式（可選）
+            elif col == "Last Week Usage":
+                style = 'background-color: #ffffcc; color: #000000;'  # 淺黃色背景
             else:
                 style = 'color: #000000;'
 
@@ -297,8 +302,8 @@ low_stock_df["Last Week Usage"] = low_stock_df["Last Week Usage"].fillna(0)
 # 篩選條件：week 1 庫存量 < 用量
 low_stock = low_stock_df[low_stock_df[update_dates["week 1"]] < low_stock_df["Last Week Usage"]]
 
-# 移除臨時計算欄位
-low_stock = low_stock.drop(columns=["Last Week Usage"])
+# 保留 Last Week Usage 欄位，以便在表格中顯示
+# 不刪除 "Last Week Usage" 欄位
 
 # 添加搜尋功能
 st.write("搜尋缺貨產品：")
@@ -317,9 +322,8 @@ if not low_stock.empty:
         ]
         if not filtered_low_stock.empty:
             st.warning("以下產品庫存不足（低於上週用量）：")
-            # 使用 HTML 渲染表格
-            usage_threshold = low_stock_df["Last Week Usage"].mean()
-            html_table = df_to_html_table(filtered_low_stock, update_dates, sorted_weeks, usage_threshold, is_low_stock=True)
+            # 使用 HTML 渲染表格，傳遞該產品的 Last Week Usage
+            html_table = df_to_html_table(filtered_low_stock, update_dates, sorted_weeks, last_week_usage=low_stock_df["Last Week Usage"].reindex(filtered_low_stock.index), is_low_stock=True)
             st.markdown(html_table, unsafe_allow_html=True)
 
             # 添加交互式表格（支援放大、排序等）
@@ -332,9 +336,8 @@ if not low_stock.empty:
             st.write("無符合條件的缺貨產品")
     else:
         st.warning("以下產品庫存不足（低於上週用量）：")
-        # 使用 HTML 渲染表格
-        usage_threshold = low_stock_df["Last Week Usage"].mean()
-        html_table = df_to_html_table(low_stock, update_dates, sorted_weeks, usage_threshold, is_low_stock=True)
+        # 使用 HTML 渲染表格，傳遞該產品的 Last Week Usage
+        html_table = df_to_html_table(low_stock, update_dates, sorted_weeks, last_week_usage=low_stock_df["Last Week Usage"].reindex(low_stock.index), is_low_stock=True)
         st.markdown(html_table, unsafe_allow_html=True)
 
         # 添加交互式表格（支援放大、排序等）
