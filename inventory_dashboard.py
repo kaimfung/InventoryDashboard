@@ -347,6 +347,15 @@ total_grouped = low_stock_df.groupby(group_cols_total).agg(agg_dict).reset_index
 # 篩選缺貨產品：week 1 總庫存低於總用量
 low_stock = total_grouped[total_grouped[update_dates["week 1"]] < total_grouped["Last Week Usage"]].copy()
 
+# 在 low_stock 中重新計算變化欄
+for i in range(len(sorted_weeks) - 1):
+    week_from = sorted_weeks[i]
+    week_to = sorted_weeks[i + 1]
+    date_from = update_dates[week_from]
+    date_to = update_dates[week_to]
+    change_column_name = f"{date_to.split('/')[0]}/{date_to.split('/')[1]}-{date_from.split('/')[0]}/{date_from.split('/')[1]}"
+    low_stock[change_column_name] = low_stock[date_to] - low_stock[date_from]
+
 # 移除 Last Week Usage 欄位
 if not low_stock.empty:
     total_usage = low_stock["Last Week Usage"]
