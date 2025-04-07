@@ -344,8 +344,11 @@ for week in sorted_weeks:
 
 total_grouped = low_stock_df.groupby(group_cols_total).agg(agg_dict).reset_index()
 
-# 篩選缺貨產品：week 1 總庫存低於總用量
-low_stock = total_grouped[total_grouped[update_dates["week 1"]] < total_grouped["Last Week Usage"]].copy()
+# 篩選缺貨產品：week 1 總庫存低於總用量，且總用量大於 0
+low_stock = total_grouped[
+    (total_grouped[update_dates["week 1"]] < total_grouped["Last Week Usage"]) &
+    (total_grouped["Last Week Usage"] > 0)
+].copy()
 
 # 在 low_stock 中重新計算變化欄
 for i in range(len(sorted_weeks) - 1):
