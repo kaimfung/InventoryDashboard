@@ -45,13 +45,11 @@ LOCATION_ABBREVIATIONS = {
     "Macau": "澳",
 }
 
-# 從 Google Sheet 讀取數據，並使用緩存
-@st.cache_data
+# 從 Google Sheet 讀取數據
 def get_data_from_google_sheet():
     weeks = ["week 1", "week 2", "week 3", "week 4", "week 5"]
     dataframes = {}
     update_dates = {}
-    inconsistencies = []
 
     for week in weeks:
         try:
@@ -61,13 +59,7 @@ def get_data_from_google_sheet():
             st.stop()
         data = worksheet.get_all_records()
         df = pd.DataFrame(data)
-        df.columns = df.columns.str.strip()  # 去除欄位名稱中的多餘空格
-        # 檢查必要的欄位是否存在
-        required_columns = ["G-Sub Group(Name)", "G-Loc/Brand(Name)", "Description", "Location Name", "Unit", "Quantity"]
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            st.error(f"工作表 '{week}' 缺少以下必要欄位：{missing_columns}")
-            st.stop()
+        df.columns = df.columns.str.strip()
         df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce").clip(lower=0).fillna(0)
         df = df.rename(columns={
             "G-Sub Group(Name)": "Sub Group",
@@ -76,25 +68,20 @@ def get_data_from_google_sheet():
             "Location Name": "Location",
             "Unit": "Unit"
         })
-        # 檢查數據一致性
-        for idx, row in df.iterrows():
-            if pd.isna(row["Sub Group"]) or pd.isna(row["Brand"]) or pd.isna(row["Desc"]) or pd.isna(row["Location"]) or pd.isna(row["Unit"]):
-                inconsistencies.append(f"工作表 '{week}' 第 {idx+2} 行：缺少必要欄位值（Sub Group, Brand, Desc, Location, Unit）")
         dataframes[week] = df
         update_date = worksheet.acell("I1").value
         update_dates[week] = update_date
 
     sorted_weeks = weeks
-    return dataframes, update_dates, sorted_weeks, inconsistencies
+    return dataframes, update_dates, sorted_weeks
 
 # 將 DataFrame 轉為 HTML 表格，並應用樣式
 def df_to_html_table(df, update_dates, sorted_weeks, last_week_usage=None, is_low_stock=False):
     date_columns = [update_dates[week] for week in sorted_weeks]
     change_columns = [col for col in df.columns if "-" in col]
 
-    # 將數值格式化，缺失值顯示為 "N/A"
     for col in date_columns + change_columns:
-        df[col] = df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) and x != "N/A" else "N/A")
+        df[col] = df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
 
     html = """
     <style>
@@ -150,21 +137,18 @@ def df_to_html_table(df, update_dates, sorted_weeks, last_week_usage=None, is_lo
                     if pd.notna(usage_threshold) and week1_stock < usage_threshold:
                         style = 'background-color: #ffcccc; color: #000000;'
             elif col in change_columns:
-                if value == "N/A":
-                    style = 'background-color: #ffffff; color: #000000;'
-                else:
-                    try:
-                        value_float = float(value)
-                        display_value = f"-{abs(value_float):.2f}" if value_float > 0 else f"{abs(value_float):.2f}"
-                        if value_float > 0:
-                            style = 'background-color: #ffcccc; color: #000000;'
-                        elif value_float < 0:
-                            style = 'background-color: #ccffcc; color: #000000;'
-                        else:
-                            style = 'background-color: #ffffff; color: #000000;'
-                        value = display_value
-                    except:
+                try:
+                    value_float = float(value) if value != "N/A" else 0
+                    display_value = f"-{abs(value_float):.2f}" if value_float > 0 else f"{abs(value_float):.2f}"
+                    if value_float > 0:
+                        style = 'background-color: #ffcccc; color: #000000;'
+                    elif value_float < 0:
+                        style = 'background-color: #ccffcc; color: #000000;'
+                    else:
                         style = 'background-color: #ffffff; color: #000000;'
+                    value = display_value
+                except:
+                    style = 'background-color: #ffffff; color: #000000;'
             else:
                 style = 'color: #000000;'
 
@@ -181,35 +165,43 @@ def get_table_download_link(df, filename="data.csv"):
     href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">下載 CSV 檔案</a>'
     return href
 
+# 初始化 session_state 用於儲存搜尋關鍵字
+if "inventory_search_term" not in st.session_state:
+    st.session_state.inventory_search_term = ""
+if "low_stock_search_term" not in st.session_state:
+    st.session_state.low_stock_search_term = ""
+
+# 定義回調函數，用於更新 session_state
+def update_inventory_search():
+    st.session_state.inventory_search_term = st.session_state.inventory_search_input
+
+def update_low_stock_search():
+    st.session_state.low_stock_search_term = st.session_state.low_stock_search_input
+
 # 主程式
 st.title("倉庫庫存查詢與缺貨提醒")
 
-# 讀取數據
 try:
-    dataframes, update_dates, sorted_weeks, inconsistencies = get_data_from_google_sheet()
+    dataframes, update_dates, sorted_weeks = get_data_from_google_sheet()
 except Exception as e:
     st.error(f"無法從 Google Sheet 讀取數據：{str(e)}。請檢查工作表名稱或權限設置。")
     st.stop()
-
-# 顯示數據不一致的警告
-if inconsistencies:
-    st.warning("發現以下數據不一致問題，請檢查 Google Sheet：")
-    for inconsistency in inconsistencies:
-        st.write(f"- {inconsistency}")
 
 df_week1 = dataframes["week 1"]
 
 # 搜尋功能
 st.subheader("庫存搜尋")
-st.write("提示：輸入關鍵字後按 Enter 鍵以搜尋")
-with st.form(key="inventory_search_form"):
-    search_term = st.text_input(
-        "輸入搜尋關鍵字（例如產品名稱、品牌或描述）",
-        key="inventory_search_input"
-    )
-    submit_button = st.form_submit_button(label="搜尋")
+st.text_input(
+    "輸入搜尋關鍵字（例如產品名稱、品牌或描述）",
+    value=st.session_state.inventory_search_term,
+    key="inventory_search_input",
+    on_change=update_inventory_search
+)
 
-if search_term or submit_button:
+# 直接使用 session_state 中的值進行搜尋
+search_term = st.session_state.inventory_search_term
+
+if search_term:
     filtered_df = df_week1[
         df_week1["Sub Group"].str.contains(search_term, case=False, na=False) |
         df_week1["Brand"].str.contains(search_term, case=False, na=False) |
@@ -237,7 +229,7 @@ if search_term or submit_button:
                 if not matching_row.empty:
                     quantities.append(matching_row["Quantity"].iloc[0])
                 else:
-                    quantities.append("N/A")  # 改為 "N/A" 以保持一致
+                    quantities.append(0)
             result_df[update_dates[week]] = quantities
 
         # 計算每周變化
@@ -246,15 +238,14 @@ if search_term or submit_button:
             week_to = sorted_weeks[i + 1]
             date_from = update_dates[week_from]
             date_to = update_dates[week_to]
-            result_df[date_from] = pd.to_numeric(result_df[date_from], errors="coerce").fillna(0)
-            result_df[date_to] = pd.to_numeric(result_df[date_to], errors="coerce").fillna(0)
+            result_df[date_from] = pd.to_numeric(result_df[date_from], errors="coerce")
+            result_df[date_to] = pd.to_numeric(result_df[date_to], errors="coerce")
             change_column_name = f"{date_to.split('/')[0]}/{date_to.split('/')[1]}-{date_from.split('/')[0]}/{date_from.split('/')[1]}"
             result_df[change_column_name] = result_df[date_to] - result_df[date_from]
-            # 如果任一週為 "N/A"，則變化也設為 "N/A"
-            result_df[change_column_name] = result_df.apply(
-                lambda row: "N/A" if row[date_from] == 0 or row[date_to] == 0 else row[change_column_name],
-                axis=1
-            )
+
+        for col in result_df.columns:
+            if "-" in col:
+                result_df[col] = pd.to_numeric(result_df[col], errors="coerce")
 
         result_df = result_df.sort_values(by=["Sub Group", "Brand", "Desc"])
 
@@ -312,34 +303,26 @@ for i in range(len(sorted_weeks) - 1):
     week_to = sorted_weeks[i + 1]
     date_from = update_dates[week_from]
     date_to = update_dates[week_to]
-    low_stock_df[date_from] = pd.to_numeric(low_stock_df[date_from], errors="coerce").fillna(0)
-    low_stock_df[date_to] = pd.to_numeric(low_stock_df[date_to], errors="coerce").fillna(0)
+    low_stock_df[date_from] = pd.to_numeric(low_stock_df[date_from], errors="coerce")
+    low_stock_df[date_to] = pd.to_numeric(low_stock_df[date_to], errors="coerce")
     change_column_name = f"{date_to.split('/')[0]}/{date_to.split('/')[1]}-{date_from.split('/')[0]}/{date_from.split('/')[1]}"
     low_stock_df[change_column_name] = low_stock_df[date_to] - low_stock_df[date_from]
-    # 如果任一週為 0，則變化也設為 "N/A"
-    low_stock_df[change_column_name] = low_stock_df.apply(
-        lambda row: "N/A" if row[date_from] == 0 or row[date_to] == 0 else row[change_column_name],
-        axis=1
-    )
+
+# 確保變化欄位也是數值型
+for col in low_stock_df.columns:
+    if "-" in col:
+        low_stock_df[col] = pd.to_numeric(low_stock_df[col], errors="coerce")
 
 # 計算用量（week 2 到 week 1 的用量）
 last_week = "week 2"
 week1_date = update_dates["week 1"]
 last_week_date = update_dates[last_week]
 usage_column = f"{last_week_date.split('/')[0]}/{last_week_date.split('/')[1]}-{week1_date.split('/')[0]}/{week1_date.split('/')[1]}"
-low_stock_df["Last Week Usage"] = low_stock_df[usage_column].apply(lambda x: x if x != "N/A" and x > 0 else 0)
+low_stock_df["Last Week Usage"] = low_stock_df[usage_column].apply(lambda x: x if x > 0 else 0)
 
-# 處理 NaN 值並確保數值型
-low_stock_df[update_dates["week 1"]] = pd.to_numeric(low_stock_df[update_dates["week 1"]], errors="coerce").fillna(0)
-low_stock_df["Last Week Usage"] = pd.to_numeric(low_stock_df["Last Week Usage"], errors="coerce").fillna(0)
-
-# 檢查必要的欄位是否存在
-if update_dates["week 1"] not in low_stock_df.columns:
-    st.error(f"low_stock_df 中缺少欄位：{update_dates['week 1']}。請檢查 Google Sheet 中的日期格式或數據。")
-    st.stop()
-if "Last Week Usage" not in low_stock_df.columns:
-    st.error("low_stock_df 中缺少欄位：Last Week Usage。請檢查程式碼邏輯。")
-    st.stop()
+# 處理 NaN 值
+low_stock_df[update_dates["week 1"]] = low_stock_df[update_dates["week 1"]].fillna(0)
+low_stock_df["Last Week Usage"] = low_stock_df["Last Week Usage"].fillna(0)
 
 # 篩選缺貨產品：week 1 庫存低於用量（加總後）
 low_stock_total = low_stock_df[low_stock_df[update_dates["week 1"]] < low_stock_df["Last Week Usage"]]
@@ -375,7 +358,7 @@ if not low_stock_total.empty:
                 if not match.empty:
                     quantities.append(match["Quantity"].iloc[0])
                 else:
-                    quantities.append("N/A")  # 改為 "N/A" 以保持一致
+                    quantities.append(0)
             matching_rows[update_dates[week]] = quantities
 
         # 計算每周變化
@@ -384,15 +367,10 @@ if not low_stock_total.empty:
             week_to = sorted_weeks[i + 1]
             date_from = update_dates[week_from]
             date_to = update_dates[week_to]
-            matching_rows[date_from] = pd.to_numeric(matching_rows[date_from], errors="coerce").fillna(0)
-            matching_rows[date_to] = pd.to_numeric(matching_rows[date_to], errors="coerce").fillna(0)
+            matching_rows[date_from] = pd.to_numeric(matching_rows[date_from], errors="coerce")
+            matching_rows[date_to] = pd.to_numeric(matching_rows[date_to], errors="coerce")
             change_column_name = f"{date_to.split('/')[0]}/{date_to.split('/')[1]}-{date_from.split('/')[0]}/{date_from.split('/')[1]}"
             matching_rows[change_column_name] = matching_rows[date_to] - matching_rows[date_from]
-            # 如果任一週為 "N/A"，則變化也設為 "N/A"
-            matching_rows[change_column_name] = matching_rows.apply(
-                lambda row: "N/A" if row[date_from] == 0 or row[date_to] == 0 else row[change_column_name],
-                axis=1
-            )
 
         detailed_low_stock = pd.concat([detailed_low_stock, matching_rows], ignore_index=True)
 
@@ -403,17 +381,19 @@ if not low_stock_total.empty:
 
     # 添加搜尋功能
     st.write("搜尋缺貨產品：")
-    st.write("提示：輸入關鍵字後按 Enter 鍵以搜尋")
-    with st.form(key="low_stock_search_form"):
-        low_stock_search_term = st.text_input(
-            "輸入搜尋關鍵字（例如產品名稱、品牌或描述）",
-            key="low_stock_search_input"
-        )
-        low_stock_submit_button = st.form_submit_button(label="搜尋")
+    st.text_input(
+        "輸入搜尋關鍵字（例如產品名稱、品牌或描述）",
+        value=st.session_state.low_stock_search_term,
+        key="low_stock_search_input",
+        on_change=update_low_stock_search
+    )
+
+    # 直接使用 session_state 中的值進行搜尋
+    low_stock_search_term = st.session_state.low_stock_search_term
 
     detailed_low_stock = detailed_low_stock.sort_values(by=["Sub Group", "Brand", "Desc", "Location"])
 
-    if low_stock_search_term or low_stock_submit_button:
+    if low_stock_search_term:
         filtered_low_stock = detailed_low_stock[
             detailed_low_stock["Sub Group"].str.contains(low_stock_search_term, case=False, na=False) |
             detailed_low_stock["Brand"].str.contains(low_stock_search_term, case=False, na=False) |
