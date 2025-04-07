@@ -42,7 +42,7 @@ LOCATION_ABBREVIATIONS = {
     "TIN WAN": "TW",
     "KERRY 1": "K1",
     "Hong Kong Ice": "HKIce",
-    "Macau": "澳",
+    "MACAU": "澳",
 }
 
 # 從 Google Sheet 讀取數據
@@ -76,7 +76,7 @@ def get_data_from_google_sheet():
     return dataframes, update_dates, sorted_weeks
 
 # 將 DataFrame 轉為 HTML 表格，並應用樣式
-def df_to_html_table(df, update_dates, sorted_weeks, last_week_usage=None, is_low_stock=False):
+def df_to_html_table(df, update_dates, sorted_weeks, total_usage=None, is_low_stock=False):
     date_columns = [update_dates[week] for week in sorted_weeks]
     change_columns = [col for col in df.columns if "-" in col]
 
@@ -133,7 +133,7 @@ def df_to_html_table(df, update_dates, sorted_weeks, last_week_usage=None, is_lo
                 style = 'background-color: #e6f3ff; color: #000000;'
                 if is_low_stock and col == update_dates["week 1"]:
                     week1_stock = float(row[update_dates["week 1"]]) if row[update_dates["week 1"]] != "N/A" else float('inf')
-                    usage_threshold = last_week_usage.iloc[idx] if last_week_usage is not None else float('inf')
+                    usage_threshold = total_usage.iloc[idx] if total_usage is not None else float('inf')
                     if pd.notna(usage_threshold) and week1_stock < usage_threshold:
                         style = 'background-color: #ffcccc; color: #000000;'
             elif col in change_columns:
@@ -311,11 +311,11 @@ for col in low_stock_df.columns:
     if "-" in col:
         low_stock_df[col] = pd.to_numeric(low_stock_df[col], errors="coerce")
 
-# 計算用量（week 2 到 week 1 的用量）
-last_week = "week 2"
-week1_date = update_dates["week 1"]
+# 計算用量（week 3 到 week 2 的用量）
+last_week = "week 3"  # 改用 week 3 到 week 2 計算用量
+week2_date = update_dates["week 2"]
 last_week_date = update_dates[last_week]
-usage_column = f"{last_week_date.split('/')[0]}/{last_week_date.split('/')[1]}-{week1_date.split('/')[0]}/{week1_date.split('/')[1]}"
+usage_column = f"{last_week_date.split('/')[0]}/{last_week_date.split('/')[1]}-{week2_date.split('/')[0]}/{week2_date.split('/')[1]}"
 low_stock_df["Last Week Usage"] = low_stock_df[usage_column].apply(lambda x: x if x > 0 else 0)
 
 # 處理 NaN 值
@@ -328,35 +328,27 @@ total_grouped = low_stock_df.groupby(group_cols_total).agg({
     update_dates["week 1"]: "sum",
     update_dates["week 2"]: "sum",
     "Last Week Usage": "sum",
+    "Location": lambda x: ", ".join([LOCATION_ABBREVIATIONS.get(loc, loc) for loc in x]),  # 合併 Location 名稱並轉為縮寫
 }).reset_index()
 
 # 篩選缺貨產品：week 1 總庫存低於總用量
-total_low_stock = total_grouped[total_grouped[update_dates["week 1"]] < total_grouped["Last Week Usage"]]
+low_stock = total_grouped[total_grouped[update_dates["week 1"]] < total_grouped["Last Week Usage"]].copy()
 
-# 如果有缺貨產品，則從原始 low_stock_df 中提取所有相關記錄
-if not total_low_stock.empty:
-    # 獲取缺貨產品的 Desc
-    low_stock_descs = total_low_stock["Desc"].unique()
-    
-    # 從原始 low_stock_df 中提取所有匹配的記錄（包括所有 Location）
-    low_stock = low_stock_df[low_stock_df["Desc"].isin(low_stock_descs)].copy()
-    
-    # 為每個 Desc 計算總用量，並映射到每個 Location 的記錄
-    total_usage_dict = total_grouped.set_index("Desc")["Last Week Usage"].to_dict()
-    low_stock["Total Last Week Usage"] = low_stock["Desc"].map(total_usage_dict)
-    
-    # 移除原始的 Last Week Usage 欄位，改用總用量
+# 移除 Last Week Usage 欄位
+if not low_stock.empty:
+    total_usage = low_stock["Last Week Usage"]
     low_stock = low_stock.drop(columns=["Last Week Usage"])
-    
-    # 重新排列欄位順序
-    desired_columns = ["Sub Group", "Brand", "Desc", "Location", "Unit"]
-    other_columns = [col for col in low_stock.columns if col not in desired_columns]
-    low_stock = low_stock[desired_columns + other_columns]
-    
-    # 按 Sub Group, Brand, Desc 排序
-    low_stock = low_stock.sort_values(by=["Sub Group", "Brand", "Desc"])
 else:
-    low_stock = pd.DataFrame(columns=low_stock_df.columns)
+    total_usage = None
+
+# 重新排列欄位順序
+desired_columns = ["Sub Group", "Brand", "Desc", "Location", "Unit"]
+other_columns = [col for col in low_stock.columns if col not in desired_columns]
+low_stock = low_stock[desired_columns + other_columns]
+
+# 按 Sub Group, Brand, Desc 排序
+if not low_stock.empty:
+    low_stock = low_stock.sort_values(by=["Sub Group", "Brand", "Desc"])
 
 # 添加搜尋功能
 st.write("搜尋缺貨產品：")
@@ -383,7 +375,7 @@ if not low_stock.empty:
                 filtered_low_stock,
                 update_dates,
                 sorted_weeks,
-                last_week_usage=filtered_low_stock["Total Last Week Usage"],
+                total_usage=total_usage.reindex(filtered_low_stock.index),
                 is_low_stock=True
             )
             st.markdown(html_table, unsafe_allow_html=True)
@@ -400,7 +392,7 @@ if not low_stock.empty:
             low_stock,
             update_dates,
             sorted_weeks,
-            last_week_usage=low_stock["Total Last Week Usage"],
+            total_usage=total_usage,
             is_low_stock=True
         )
         st.markdown(html_table, unsafe_allow_html=True)
