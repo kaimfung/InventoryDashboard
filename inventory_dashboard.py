@@ -267,14 +267,11 @@ if search_term:
 else:
     st.write("請輸入搜尋關鍵字")
 
-# 缺貨提醒：先按 Desc 加總所有 Location 的庫存，再判斷是否缺貨
+# 缺貨提醒：當 week 1 的庫存量低於用量時顯示
 st.subheader("缺貨提醒")
 
-# 準備缺貨表格，按 Desc 加總所有 Location
-group_cols_total = ["Sub Group", "Brand", "Desc", "Unit"]  # 不包含 Location
-low_stock_df = df_week1.groupby(group_cols_total).agg({
-    "Quantity": "sum"
-}).reset_index()
+# 準備缺貨表格
+low_stock_df = df_week1[["Sub Group", "Brand", "Desc", "Location", "Unit", "Quantity"]].copy()
 low_stock_df.rename(columns={"Quantity": update_dates["week 1"]}, inplace=True)
 
 # 為其他週添加日期欄位
@@ -288,6 +285,7 @@ for week in sorted_weeks:
             (df_week["Sub Group"] == row["Sub Group"]) &
             (df_week["Brand"] == row["Brand"]) &
             (df_week["Desc"] == row["Desc"]) &
+            (df_week["Location"] == row["Location"]) &
             (df_week["Unit"] == row["Unit"])
         ]
         if not matching_rows.empty:
@@ -324,88 +322,68 @@ low_stock_df["Last Week Usage"] = low_stock_df[usage_column].apply(lambda x: x i
 low_stock_df[update_dates["week 1"]] = low_stock_df[update_dates["week 1"]].fillna(0)
 low_stock_df["Last Week Usage"] = low_stock_df["Last Week Usage"].fillna(0)
 
-# 篩選缺貨產品：week 1 庫存低於用量（加總後）
-low_stock_total = low_stock_df[low_stock_df[update_dates["week 1"]] < low_stock_df["Last Week Usage"]]
+# 按 Desc 合併數據，計算總庫存和總用量
+group_cols_total = ["Sub Group", "Brand", "Desc", "Unit"]
+total_grouped = low_stock_df.groupby(group_cols_total).agg({
+    update_dates["week 1"]: "sum",
+    update_dates["week 2"]: "sum",
+    "Last Week Usage": "sum",
+}).reset_index()
 
-# 如果有缺貨產品，展開顯示每個 Location 的詳細庫存
-if not low_stock_total.empty:
-    # 準備顯示詳細庫存的表格
-    detailed_low_stock = pd.DataFrame()
-    for _, row in low_stock_total.iterrows():
-        # 從 week 1 數據中獲取該產品的所有 Location 詳細資料
-        matching_rows = df_week1[
-            (df_week1["Sub Group"] == row["Sub Group"]) &
-            (df_week1["Brand"] == row["Brand"]) &
-            (df_week1["Desc"] == row["Desc"]) &
-            (df_week1["Unit"] == row["Unit"])
-        ][["Sub Group", "Brand", "Desc", "Location", "Unit", "Quantity"]]
-        matching_rows.rename(columns={"Quantity": update_dates["week 1"]}, inplace=True)
+# 篩選缺貨產品：week 1 總庫存低於總用量
+total_low_stock = total_grouped[total_grouped[update_dates["week 1"]] < total_grouped["Last Week Usage"]]
 
-        # 為其他週添加數據
-        for week in sorted_weeks:
-            if week == "week 1":
-                continue
-            df_week = dataframes[week]
-            quantities = []
-            for _, match_row in matching_rows.iterrows():
-                match = df_week[
-                    (df_week["Sub Group"] == match_row["Sub Group"]) &
-                    (df_week["Brand"] == match_row["Brand"]) &
-                    (df_week["Desc"] == match_row["Desc"]) &
-                    (df_week["Location"] == match_row["Location"]) &
-                    (df_week["Unit"] == match_row["Unit"])
-                ]
-                if not match.empty:
-                    quantities.append(match["Quantity"].iloc[0])
-                else:
-                    quantities.append(0)
-            matching_rows[update_dates[week]] = quantities
-
-        # 計算每周變化
-        for i in range(len(sorted_weeks) - 1):
-            week_from = sorted_weeks[i]
-            week_to = sorted_weeks[i + 1]
-            date_from = update_dates[week_from]
-            date_to = update_dates[week_to]
-            matching_rows[date_from] = pd.to_numeric(matching_rows[date_from], errors="coerce")
-            matching_rows[date_to] = pd.to_numeric(matching_rows[date_to], errors="coerce")
-            change_column_name = f"{date_to.split('/')[0]}/{date_to.split('/')[1]}-{date_from.split('/')[0]}/{date_from.split('/')[1]}"
-            matching_rows[change_column_name] = matching_rows[date_to] - matching_rows[date_from]
-
-        detailed_low_stock = pd.concat([detailed_low_stock, matching_rows], ignore_index=True)
-
+# 如果有缺貨產品，則從原始 low_stock_df 中提取所有相關記錄
+if not total_low_stock.empty:
+    # 獲取缺貨產品的 Desc
+    low_stock_descs = total_low_stock["Desc"].unique()
+    
+    # 從原始 low_stock_df 中提取所有匹配的記錄（包括所有 Location）
+    low_stock = low_stock_df[low_stock_df["Desc"].isin(low_stock_descs)].copy()
+    
+    # 為每個 Desc 計算總用量，並映射到每個 Location 的記錄
+    total_usage_dict = total_grouped.set_index("Desc")["Last Week Usage"].to_dict()
+    low_stock["Total Last Week Usage"] = low_stock["Desc"].map(total_usage_dict)
+    
+    # 移除原始的 Last Week Usage 欄位，改用總用量
+    low_stock = low_stock.drop(columns=["Last Week Usage"])
+    
     # 重新排列欄位順序
     desired_columns = ["Sub Group", "Brand", "Desc", "Location", "Unit"]
-    other_columns = [col for col in detailed_low_stock.columns if col not in desired_columns]
-    detailed_low_stock = detailed_low_stock[desired_columns + other_columns]
+    other_columns = [col for col in low_stock.columns if col not in desired_columns]
+    low_stock = low_stock[desired_columns + other_columns]
+    
+    # 按 Sub Group, Brand, Desc 排序
+    low_stock = low_stock.sort_values(by=["Sub Group", "Brand", "Desc"])
+else:
+    low_stock = pd.DataFrame(columns=low_stock_df.columns)
 
-    # 添加搜尋功能
-    st.write("搜尋缺貨產品：")
-    st.text_input(
-        "輸入搜尋關鍵字（例如產品名稱、品牌或描述）",
-        value=st.session_state.low_stock_search_term,
-        key="low_stock_search_input",
-        on_change=update_low_stock_search
-    )
+# 添加搜尋功能
+st.write("搜尋缺貨產品：")
+st.text_input(
+    "輸入搜尋關鍵字（例如產品名稱、品牌或描述）",
+    value=st.session_state.low_stock_search_term,
+    key="low_stock_search_input",
+    on_change=update_low_stock_search
+)
 
-    # 直接使用 session_state 中的值進行搜尋
-    low_stock_search_term = st.session_state.low_stock_search_term
+# 直接使用 session_state 中的值進行搜尋
+low_stock_search_term = st.session_state.low_stock_search_term
 
-    detailed_low_stock = detailed_low_stock.sort_values(by=["Sub Group", "Brand", "Desc", "Location"])
-
+if not low_stock.empty:
     if low_stock_search_term:
-        filtered_low_stock = detailed_low_stock[
-            detailed_low_stock["Sub Group"].str.contains(low_stock_search_term, case=False, na=False) |
-            detailed_low_stock["Brand"].str.contains(low_stock_search_term, case=False, na=False) |
-            detailed_low_stock["Desc"].str.contains(low_stock_search_term, case=False, na=False)
+        filtered_low_stock = low_stock[
+            low_stock["Sub Group"].str.contains(low_stock_search_term, case=False, na=False) |
+            low_stock["Brand"].str.contains(low_stock_search_term, case=False, na=False) |
+            low_stock["Desc"].str.contains(low_stock_search_term, case=False, na=False)
         ]
         if not filtered_low_stock.empty:
-            st.warning("以下產品庫存不足（低於上週用量，加總所有地點後）：")
+            st.warning("以下產品庫存不足（低於上週用量）：")
             html_table = df_to_html_table(
                 filtered_low_stock,
                 update_dates,
                 sorted_weeks,
-                last_week_usage=None,  # 因為已經按加總後判斷，這裡不再需要單獨的用量比較
+                last_week_usage=filtered_low_stock["Total Last Week Usage"],
                 is_low_stock=True
             )
             st.markdown(html_table, unsafe_allow_html=True)
@@ -417,19 +395,19 @@ if not low_stock_total.empty:
         else:
             st.write("無符合條件的缺貨產品")
     else:
-        st.warning("以下產品庫存不足（低於上週用量，加總所有地點後）：")
+        st.warning("以下產品庫存不足（低於上週用量）：")
         html_table = df_to_html_table(
-            detailed_low_stock,
+            low_stock,
             update_dates,
             sorted_weeks,
-            last_week_usage=None,
+            last_week_usage=low_stock["Total Last Week Usage"],
             is_low_stock=True
         )
         st.markdown(html_table, unsafe_allow_html=True)
 
         st.write("交互式表格（可排序、調整列寬）：")
-        st.dataframe(detailed_low_stock, use_container_width=True)
+        st.dataframe(low_stock, use_container_width=True)
 
-        st.markdown(get_table_download_link(detailed_low_stock, "low_stock_result.csv"), unsafe_allow_html=True)
+        st.markdown(get_table_download_link(low_stock, "low_stock_result.csv"), unsafe_allow_html=True)
 else:
-    st.success("目前無缺貨產品（加總所有地點後）！")
+    st.success("目前無缺貨產品！")
