@@ -279,26 +279,30 @@ st.subheader("缺貨提醒")
 low_stock_df = df_week1[["Sub Group", "Brand", "Desc", "Location", "Unit", "Quantity"]].copy()
 low_stock_df.rename(columns={"Quantity": update_dates["week 1"]}, inplace=True)
 
-# 為其他週添加日期欄位
+# 為其他週添加日期欄位，確保所有欄位存在
 for week in sorted_weeks:
     if week == "week 1":
         continue
     df_week = dataframes[week]
-    quantities = []
-    for _, row in low_stock_df.iterrows():
-        matching_rows = df_week[
-            (df_week["Sub Group"] == row["Sub Group"]) &
-            (df_week["Brand"] == row["Brand"]) &
-            (df_week["Desc"] == row["Desc"]) &
-            (df_week["Location"] == row["Location"]) &
-            (df_week["Unit"] == row["Unit"])
-        ]
-        if not matching_rows.empty:
-            qty = matching_rows["Quantity"].sum()
-            quantities.append(qty)
-        else:
-            quantities.append(0)
-    low_stock_df[update_dates[week]] = quantities
+    if df_week.empty:
+        # 如果該週的數據為空，則填充 0
+        low_stock_df[update_dates[week]] = 0
+    else:
+        quantities = []
+        for _, row in low_stock_df.iterrows():
+            matching_rows = df_week[
+                (df_week["Sub Group"] == row["Sub Group"]) &
+                (df_week["Brand"] == row["Brand"]) &
+                (df_week["Desc"] == row["Desc"]) &
+                (df_week["Location"] == row["Location"]) &
+                (df_week["Unit"] == row["Unit"])
+            ]
+            if not matching_rows.empty:
+                qty = matching_rows["Quantity"].sum()
+                quantities.append(qty)
+            else:
+                quantities.append(0)
+        low_stock_df[update_dates[week]] = quantities
 
 # 計算每周變化（前一週減後一週）
 for i in range(len(sorted_weeks) - 1):
@@ -306,6 +310,8 @@ for i in range(len(sorted_weeks) - 1):
     week_to = sorted_weeks[i + 1]
     date_from = update_dates[week_from]
     date_to = update_dates[week_to]
+    low_stock_df[date_from] = pd.to_numeric(low_stock_df[date_from], errors="coerce")
+    low_stock_df[date_to] = pd.to_numeric(low_stock_df[date_to], errors="coerce")
     change_column_name = f"{date_to.split('/')[0]}/{date_to.split('/')[1]}-{date_from.split('/')[0]}/{date_from.split('/')[1]}"
     low_stock_df[change_column_name] = low_stock_df[date_to] - low_stock_df[date_from]
 
@@ -322,17 +328,21 @@ usage_column = f"{last_week_date.split('/')[0]}/{last_week_date.split('/')[1]}-{
 low_stock_df["Last Week Usage"] = low_stock_df[usage_column].apply(lambda x: x if x > 0 else 0)
 
 # 處理 NaN 值
-low_stock_df[update_dates["week 1"]] = low_stock_df[update_dates["week 1"]].fillna(0)
+for week in sorted_weeks:
+    low_stock_df[update_dates[week]] = low_stock_df[update_dates[week]].fillna(0)
 low_stock_df["Last Week Usage"] = low_stock_df["Last Week Usage"].fillna(0)
 
-# 按 Desc 合併數據，計算總庫存和總用量
+# 按 Desc 合併數據，計算總庫存和總用量，確保所有日期欄位都被聚合
 group_cols_total = ["Sub Group", "Brand", "Desc", "Unit"]
-total_grouped = low_stock_df.groupby(group_cols_total).agg({
-    update_dates["week 1"]: "sum",
-    update_dates["week 2"]: "sum",
-    "Last Week Usage": "sum",
+agg_dict = {
     "Location": lambda x: ", ".join([LOCATION_ABBREVIATIONS.get(loc, loc) for loc in x]),
-}).reset_index()
+    "Last Week Usage": "sum",
+}
+# 動態添加所有日期欄位到聚合字典
+for week in sorted_weeks:
+    agg_dict[update_dates[week]] = "sum"
+
+total_grouped = low_stock_df.groupby(group_cols_total).agg(agg_dict).reset_index()
 
 # 篩選缺貨產品：week 1 總庫存低於總用量
 low_stock = total_grouped[total_grouped[update_dates["week 1"]] < total_grouped["Last Week Usage"]].copy()
@@ -344,10 +354,12 @@ if not low_stock.empty:
 else:
     total_usage = None
 
-# 重新排列欄位順序
+# 重新排列欄位順序，確保所有欄位都顯示
 desired_columns = ["Sub Group", "Brand", "Desc", "Location", "Unit"]
-other_columns = [col for col in low_stock.columns if col not in desired_columns]
-low_stock = low_stock[desired_columns + other_columns]
+date_columns = [update_dates[week] for week in sorted_weeks]
+change_columns = [f"{update_dates[sorted_weeks[i+1]].split('/')[0]}/{update_dates[sorted_weeks[i+1]].split('/')[1]}-{update_dates[sorted_weeks[i]].split('/')[0]}/{update_dates[sorted_weeks[i]].split('/')[1]}" for i in range(len(sorted_weeks)-1)]
+other_columns = [col for col in low_stock.columns if col not in desired_columns + date_columns + change_columns]
+low_stock = low_stock[desired_columns + date_columns + change_columns + other_columns]
 
 # 按 Sub Group, Brand, Desc 排序
 if not low_stock.empty:
