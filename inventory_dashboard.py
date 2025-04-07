@@ -281,7 +281,7 @@ if search_term:
         html_table = df_to_html_table(result_df, update_dates, sortedWeeks)
         st.markdown(html_table, unsafe_allow_html=True)
 
-        st.write("交互式 tables（可排序、調整列寬）：")
+        st.write("交互式表格（可排序、調整列寬）：")
         st.dataframe(result_df, use_container_width=True)
 
         st.markdown(get_table_download_link(result_df, "inventory_search_result.csv"), unsafe_allow_html=True)
@@ -335,7 +335,7 @@ last_week_date = update_dates[last_week]
 usage_column = f"{last_week_date.split('/')[0]}/{last_week_date.split('/')[1]}-{week1_date.split('/')[0]}/{week1_date.split('/')[1]}"
 low_stock_df["Last Week Usage"] = low_stock_df[usage_column].apply(lambda x: x if x != "N/A" and x > 0 else 0)
 
-# 處理 NaN 值
+# 處理 NaN 值並確保數值型
 low_stock_df[update_dates["week 1"]] = pd.to_numeric(low_stock_df[update_dates["week 1"]], errors="coerce").fillna(0)
 low_stock_df["Last Week Usage"] = pd.to_numeric(low_stock_df["Last Week Usage"], errors="coerce").fillna(0)
 
@@ -350,61 +350,18 @@ if "Last Week Usage" not in low_stock_df.columns:
     st.error("low_stock_df 中缺少欄位：Last Week Usage。請檢查程式碼邏輯。")
     st.stop()
 
-# 按 Sub Group, Brand, Desc, Unit 合併數據，計算總庫存量
-group_cols = ["Sub Group", "Brand", "Desc", "Unit"]
-try:
-    grouped_by_desc = low_stock_df.groupby(group_cols).agg({
-        update_dates["week 1"]: "sum",
-        "Last Week Usage": "sum",
-    }).reset_index()
-except Exception as e:
-    st.error(f"執行 groupby 操作時發生錯誤：{str(e)}。請檢查 low_stock_df 的數據類型或欄位名稱。")
-    st.stop()
+# 篩選缺貨產品：week 1 庫存低於用量（逐行比較）
+low_stock_df = low_stock_df[low_stock_df[update_dates["week 1"]] < low_stock_df["Last Week Usage"]]
 
-# 為其他週添加數據（加總所有地點）
-for week in sortedWeeks:
-    if week == "week 1":
-        continue
-    grouped_by_desc[update_dates[week]] = low_stock_df.groupby(group_cols)[update_dates[week]].sum()
-
-# 重新計算變化欄位（基於加總後的數據）
-for i in range(len(sortedWeeks) - 1):
-    week_from = sortedWeeks[i]
-    week_to = sortedWeeks[i + 1]
-    date_from = update_dates[week_from]
-    date_to = update_dates[week_to]
-    grouped_by_desc[date_from] = pd.to_numeric(grouped_by_desc[date_from], errors="coerce").fillna(0)
-    grouped_by_desc[date_to] = pd.to_numeric(grouped_by_desc[date_to], errors="coerce").fillna(0)
-    change_column_name = f"{date_to.split('/')[0]}/{date_to.split('/')[1]}-{date_from.split('/')[0]}/{date_from.split('/')[1]}"
-    grouped_by_desc[change_column_name] = grouped_by_desc[date_to] - grouped_by_desc[date_from]
-    grouped_by_desc[change_column_name] = grouped_by_desc.apply(
-        lambda row: "N/A" if row[date_from] == 0 or row[date_to] == 0 else row[change_column_name],
-        axis=1
-    )
-
-# 篩選缺貨產品：week 1 總庫存低於用量
-low_stock_by_desc = grouped_by_desc[grouped_by_desc[update_dates["week 1"]] < grouped_by_desc["Last Week Usage"]]
-
-# 準備最終顯示的表格，重新加入 Location 欄
-if not low_stock_by_desc.empty:
-    # 合併所有地點的 Location 資訊
-    location_dict = low_stock_df.groupby(group_cols)["Location"].apply(
-        lambda x: ", ".join(sorted(set(x)))
-    ).to_dict()
-
-    # 將 Location 資訊映射回 low_stock_by_desc
-    low_stock_by_desc["Location"] = low_stock_by_desc.apply(
-        lambda row: location_dict.get((row["Sub Group"], row["Brand"], row["Desc"], row["Unit"]), ""),
-        axis=1
-    )
-
+# 準備最終顯示的表格
+if not low_stock_df.empty:
     # 移除 Last Week Usage 欄位
-    low_stock_by_desc = low_stock_by_desc.drop(columns=["Last Week Usage"])
+    low_stock_df = low_stock_df.drop(columns=["Last Week Usage"])
 
     # 重新排列欄位順序
     desired_columns = ["Sub Group", "Brand", "Desc", "Location", "Unit"]
-    other_columns = [col for col in low_stock_by_desc.columns if col not in desired_columns]
-    low_stock_by_desc = low_stock_by_desc[desired_columns + other_columns]
+    other_columns = [col for col in low_stock_df.columns if col not in desired_columns]
+    low_stock_df = low_stock_df[desired_columns + other_columns]
 
     # 添加搜尋功能
     st.write("搜尋缺貨產品：")
@@ -418,13 +375,13 @@ if not low_stock_by_desc.empty:
     # 直接使用 session_state 中的值進行搜尋
     low_stock_search_term = st.session_state.low_stock_search_term
 
-    low_stock_by_desc = low_stock_by_desc.sort_values(by=["Sub Group", "Brand", "Desc"])
+    low_stock_df = low_stock_df.sort_values(by=["Sub Group", "Brand", "Desc"])
 
     if low_stock_search_term:
-        filtered_low_stock = low_stock_by_desc[
-            low_stock_by_desc["Sub Group"].str.contains(low_stock_search_term, case=False, na=False) |
-            low_stock_by_desc["Brand"].str.contains(low_stock_search_term, case=False, na=False) |
-            low_stock_by_desc["Desc"].str.contains(low_stock_search_term, case=False, na=False)
+        filtered_low_stock = low_stock_df[
+            low_stock_df["Sub Group"].str.contains(low_stock_search_term, case=False, na=False) |
+            low_stock_df["Brand"].str.contains(low_stock_search_term, case=False, na=False) |
+            low_stock_df["Desc"].str.contains(low_stock_search_term, case=False, na=False)
         ]
         if not filtered_low_stock.empty:
             st.warning("以下產品庫存不足（低於上週用量）：")
@@ -432,7 +389,6 @@ if not low_stock_by_desc.empty:
                 filtered_low_stock,
                 update_dates,
                 sortedWeeks,
-                last_week_usage=grouped_by_desc["Last Week Usage"].reindex(filtered_low_stock.index),
                 is_low_stock=True
             )
             st.markdown(html_table, unsafe_allow_html=True)
@@ -446,17 +402,16 @@ if not low_stock_by_desc.empty:
     else:
         st.warning("以下產品庫存不足（低於上週用量）：")
         html_table = df_to_html_table(
-            low_stock_by_desc,
+            low_stock_df,
             update_dates,
             sortedWeeks,
-            last_week_usage=grouped_by_desc["Last Week Usage"].reindex(low_stock_by_desc.index),
             is_low_stock=True
         )
         st.markdown(html_table, unsafe_allow_html=True)
 
         st.write("交互式表格（可排序、調整列寬）：")
-        st.dataframe(low_stock_by_desc, use_container_width=True)
+        st.dataframe(low_stock_df, use_container_width=True)
 
-        st.markdown(get_table_download_link(low_stock_by_desc, "low_stock_result.csv"), unsafe_allow_html=True)
+        st.markdown(get_table_download_link(low_stock_df, "low_stock_result.csv"), unsafe_allow_html=True)
 else:
     st.success("目前無缺貨產品！")
