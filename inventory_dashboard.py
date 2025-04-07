@@ -166,31 +166,18 @@ def get_table_download_link(df, filename="data.csv"):
     href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">下載 CSV 檔案</a>'
     return href
 
-# 初始化 session_state 用於儲存搜尋關鍵字和時間戳
+# 初始化 session_state 用於儲存搜尋關鍵字
 if "inventory_search_term" not in st.session_state:
     st.session_state.inventory_search_term = ""
 if "low_stock_search_term" not in st.session_state:
     st.session_state.low_stock_search_term = ""
-if "inventory_search_timestamp" not in st.session_state:
-    st.session_state.inventory_search_timestamp = 0
-if "low_stock_search_timestamp" not in st.session_state:
-    st.session_state.low_stock_search_timestamp = 0
-if "inventory_search_display_term" not in st.session_state:
-    st.session_state.inventory_search_display_term = ""
-if "low_stock_search_display_term" not in st.session_state:
-    st.session_state.low_stock_search_display_term = ""
-
-# 定義防抖延遲時間（單位：秒）
-DEBOUNCE_DELAY = 0.3  # 300 毫秒
 
 # 定義回調函數，用於更新 session_state
 def update_inventory_search():
     st.session_state.inventory_search_term = st.session_state.inventory_search_input
-    st.session_state.inventory_search_timestamp = time.time()
 
 def update_low_stock_search():
     st.session_state.low_stock_search_term = st.session_state.low_stock_search_input
-    st.session_state.low_stock_search_timestamp = time.time()
 
 # 主程式
 st.title("倉庫庫存查詢與缺貨提醒")
@@ -212,13 +199,8 @@ st.text_input(
     on_change=update_inventory_search
 )
 
-# 檢查是否需要更新搜尋結果（防抖機制）
-current_time = time.time()
-if (current_time - st.session_state.inventory_search_timestamp) >= DEBOUNCE_DELAY:
-    st.session_state.inventory_search_display_term = st.session_state.inventory_search_term
-
-# 使用防抖後的搜尋關鍵字進行搜尋
-search_term = st.session_state.inventory_search_display_term
+# 直接使用 session_state 中的值進行搜尋，移除防抖機制
+search_term = st.session_state.inventory_search_term
 
 if search_term:
     filtered_df = df_week1[
@@ -346,11 +328,14 @@ def combine_locations(group):
     all_locations = set()
     for week in sorted_weeks:
         if week == "week 1":
-            locs = group["Location"]
+            locs = group["Location"].tolist()
             all_locations.update(locs)
         else:
-            locs = group[f"{week}_locations"].explode()
-            all_locations.update(locs)
+            # 直接處理列表，不使用 explode()
+            locs_list = group[f"{week}_locations"].tolist()
+            for locs in locs_list:
+                if isinstance(locs, list):
+                    all_locations.update(locs)
     all_locations.discard("")
     abbreviated_locs = [LOCATION_ABBREVIATIONS.get(loc, loc) for loc in all_locations if loc]
     return ", ".join(sorted(abbreviated_locs))
@@ -383,12 +368,8 @@ st.text_input(
     on_change=update_low_stock_search
 )
 
-# 檢查是否需要更新搜尋結果（防抖機制）
-if (current_time - st.session_state.low_stock_search_timestamp) >= DEBOUNCE_DELAY:
-    st.session_state.low_stock_search_display_term = st.session_state.low_stock_search_term
-
-# 使用防抖後的搜尋關鍵字進行搜尋
-low_stock_search_term = st.session_state.low_stock_search_display_term
+# 直接使用 session_state 中的值進行搜尋，移除防抖機制
+low_stock_search_term = st.session_state.low_stock_search_term
 
 if not low_stock.empty:
     low_stock = low_stock.sort_values(by=["Sub Group", "Brand", "Desc"])
