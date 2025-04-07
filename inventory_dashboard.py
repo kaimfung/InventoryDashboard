@@ -281,7 +281,7 @@ if search_term:
         html_table = df_to_html_table(result_df, update_dates, sortedWeeks)
         st.markdown(html_table, unsafe_allow_html=True)
 
-        st.write("交互式表格（可排序、調整列寬）：")
+        st.write("交互式 tables（可排序、調整列寬）：")
         st.dataframe(result_df, use_container_width=True)
 
         st.markdown(get_table_download_link(result_df, "inventory_search_result.csv"), unsafe_allow_html=True)
@@ -317,10 +317,12 @@ for i in range(len(sortedWeeks) - 1):
     week_to = sortedWeeks[i + 1]
     date_from = update_dates[week_from]
     date_to = update_dates[week_to]
+    # 將 "N/A" 替換為 0 以進行計算，計算後再轉回 "N/A"
     low_stock_df[date_from] = pd.to_numeric(low_stock_df[date_from], errors="coerce").fillna(0)
     low_stock_df[date_to] = pd.to_numeric(low_stock_df[date_to], errors="coerce").fillna(0)
     change_column_name = f"{date_to.split('/')[0]}/{date_to.split('/')[1]}-{date_from.split('/')[0]}/{date_from.split('/')[1]}"
     low_stock_df[change_column_name] = low_stock_df[date_to] - low_stock_df[date_from]
+    # 如果任一週為 "N/A"，則變化也設為 "N/A"
     low_stock_df[change_column_name] = low_stock_df.apply(
         lambda row: "N/A" if row[date_from] == 0 or row[date_to] == 0 else row[change_column_name],
         axis=1
@@ -334,15 +336,30 @@ usage_column = f"{last_week_date.split('/')[0]}/{last_week_date.split('/')[1]}-{
 low_stock_df["Last Week Usage"] = low_stock_df[usage_column].apply(lambda x: x if x != "N/A" and x > 0 else 0)
 
 # 處理 NaN 值
-low_stock_df[update_dates["week 1"]] = low_stock_df[update_dates["week 1"]].fillna(0)
-low_stock_df["Last Week Usage"] = low_stock_df["Last Week Usage"].fillna(0)
+low_stock_df[update_dates["week 1"]] = pd.to_numeric(low_stock_df[update_dates["week 1"]], errors="coerce").fillna(0)
+low_stock_df["Last Week Usage"] = pd.to_numeric(low_stock_df["Last Week Usage"], errors="coerce").fillna(0)
+
+# 檢查 low_stock_df 的欄位名稱（用於調試）
+st.write("low_stock_df 欄位名稱：", list(low_stock_df.columns))
+
+# 檢查必要的欄位是否存在
+if update_dates["week 1"] not in low_stock_df.columns:
+    st.error(f"low_stock_df 中缺少欄位：{update_dates['week 1']}。請檢查 Google Sheet 中的日期格式或數據。")
+    st.stop()
+if "Last Week Usage" not in low_stock_df.columns:
+    st.error("low_stock_df 中缺少欄位：Last Week Usage。請檢查程式碼邏輯。")
+    st.stop()
 
 # 按 Sub Group, Brand, Desc, Unit 合併數據，計算總庫存量
 group_cols = ["Sub Group", "Brand", "Desc", "Unit"]
-grouped_by_desc = low_stock_df.groupby(group_cols).agg({
-    update_dates["week 1"]: "sum",
-    "Last Week Usage": "sum",
-}).reset_index()
+try:
+    grouped_by_desc = low_stock_df.groupby(group_cols).agg({
+        update_dates["week 1"]: "sum",
+        "Last Week Usage": "sum",
+    }).reset_index()
+except Exception as e:
+    st.error(f"執行 groupby 操作時發生錯誤：{str(e)}。請檢查 low_stock_df 的數據類型或欄位名稱。")
+    st.stop()
 
 # 為其他週添加數據（加總所有地點）
 for week in sortedWeeks:
