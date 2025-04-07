@@ -201,12 +201,15 @@ df_week1 = dataframes["week 1"]
 
 # 搜尋功能
 st.subheader("庫存搜尋")
-search_term = st.text_input(
-    "輸入搜尋關鍵字（例如產品名稱、品牌或描述）",
-    key="inventory_search_input"
-)
+st.write("提示：輸入關鍵字後按 Enter 鍵以搜尋")
+with st.form(key="inventory_search_form"):
+    search_term = st.text_input(
+        "輸入搜尋關鍵字（例如產品名稱、品牌或描述）",
+        key="inventory_search_input"
+    )
+    submit_button = st.form_submit_button(label="搜尋")
 
-if search_term:
+if search_term or submit_button:
     filtered_df = df_week1[
         df_week1["Sub Group"].str.contains(search_term, case=False, na=False) |
         df_week1["Brand"].str.contains(search_term, case=False, na=False) |
@@ -330,9 +333,6 @@ low_stock_df["Last Week Usage"] = low_stock_df[usage_column].apply(lambda x: x i
 low_stock_df[update_dates["week 1"]] = pd.to_numeric(low_stock_df[update_dates["week 1"]], errors="coerce").fillna(0)
 low_stock_df["Last Week Usage"] = pd.to_numeric(low_stock_df["Last Week Usage"], errors="coerce").fillna(0)
 
-# 檢查 low_stock_df 的欄位名稱（用於調試）
-st.write("low_stock_df 欄位名稱：", list(low_stock_df.columns))
-
 # 檢查必要的欄位是否存在
 if update_dates["week 1"] not in low_stock_df.columns:
     st.error(f"low_stock_df 中缺少欄位：{update_dates['week 1']}。請檢查 Google Sheet 中的日期格式或數據。")
@@ -403,14 +403,17 @@ if not low_stock_total.empty:
 
     # 添加搜尋功能
     st.write("搜尋缺貨產品：")
-    low_stock_search_term = st.text_input(
-        "輸入搜尋關鍵字（例如產品名稱、品牌或描述）",
-        key="low_stock_search_input"
-    )
+    st.write("提示：輸入關鍵字後按 Enter 鍵以搜尋")
+    with st.form(key="low_stock_search_form"):
+        low_stock_search_term = st.text_input(
+            "輸入搜尋關鍵字（例如產品名稱、品牌或描述）",
+            key="low_stock_search_input"
+        )
+        low_stock_submit_button = st.form_submit_button(label="搜尋")
 
     detailed_low_stock = detailed_low_stock.sort_values(by=["Sub Group", "Brand", "Desc", "Location"])
 
-    if low_stock_search_term:
+    if low_stock_search_term or low_stock_submit_button:
         filtered_low_stock = detailed_low_stock[
             detailed_low_stock["Sub Group"].str.contains(low_stock_search_term, case=False, na=False) |
             detailed_low_stock["Brand"].str.contains(low_stock_search_term, case=False, na=False) |
