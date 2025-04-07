@@ -69,7 +69,8 @@ def get_data_from_google_sheet():
             "Unit": "Unit"
         })
         dataframes[week] = df
-        update_date = worksheet.acell("I1").value
+        # 清理日期格式，移除首尾空格和換行符
+        update_date = worksheet.acell("I1").value.strip()
         update_dates[week] = update_date
 
     sorted_weeks = weeks
@@ -80,8 +81,12 @@ def df_to_html_table(df, update_dates, sorted_weeks, total_usage=None, is_low_st
     date_columns = [update_dates[week] for week in sorted_weeks]
     change_columns = [col for col in df.columns if "-" in col]
 
+    # 格式化數值，保留 2 位小數，並處理 NaN
     for col in date_columns + change_columns:
-        df[col] = df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
+        if col in df.columns:  # 檢查欄位是否存在
+            df[col] = df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
+        else:
+            st.warning(f"欄位 '{col}' 不存在於 DataFrame 中，跳過格式化。")
 
     html = """
     <style>
@@ -301,8 +306,6 @@ for i in range(len(sorted_weeks) - 1):
     week_to = sorted_weeks[i + 1]
     date_from = update_dates[week_from]
     date_to = update_dates[week_to]
-    low_stock_df[date_from] = pd.to_numeric(low_stock_df[date_from], errors="coerce")
-    low_stock_df[date_to] = pd.to_numeric(low_stock_df[date_to], errors="coerce")
     change_column_name = f"{date_to.split('/')[0]}/{date_to.split('/')[1]}-{date_from.split('/')[0]}/{date_from.split('/')[1]}"
     low_stock_df[change_column_name] = low_stock_df[date_to] - low_stock_df[date_from]
 
@@ -312,7 +315,7 @@ for col in low_stock_df.columns:
         low_stock_df[col] = pd.to_numeric(low_stock_df[col], errors="coerce")
 
 # 計算用量（week 3 到 week 2 的用量）
-last_week = "week 3"  # 改用 week 3 到 week 2 計算用量
+last_week = "week 3"
 week2_date = update_dates["week 2"]
 last_week_date = update_dates[last_week]
 usage_column = f"{last_week_date.split('/')[0]}/{last_week_date.split('/')[1]}-{week2_date.split('/')[0]}/{week2_date.split('/')[1]}"
@@ -328,7 +331,7 @@ total_grouped = low_stock_df.groupby(group_cols_total).agg({
     update_dates["week 1"]: "sum",
     update_dates["week 2"]: "sum",
     "Last Week Usage": "sum",
-    "Location": lambda x: ", ".join([LOCATION_ABBREVIATIONS.get(loc, loc) for loc in x]),  # 合併 Location 名稱並轉為縮寫
+    "Location": lambda x: ", ".join([LOCATION_ABBREVIATIONS.get(loc, loc) for loc in x]),
 }).reset_index()
 
 # 篩選缺貨產品：week 1 總庫存低於總用量
