@@ -199,7 +199,7 @@ st.title("倉庫庫存查詢與缺貨提醒")
 
 # 讀取數據
 try:
-    dataframes, update_dates, sortedWeeks = get_data_from_google_sheet()
+    dataframes, update_dates, sortedWeeks, inconsistencies = get_data_from_google_sheet()
 except Exception as e:
     st.error(f"無法從 Google Sheet 讀取數據：{str(e)}。請檢查工作表名稱或權限設置。")
     st.stop()
