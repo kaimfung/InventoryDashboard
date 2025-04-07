@@ -212,19 +212,27 @@ if search_term:
         result_df = filtered_df[["Sub Group", "Brand", "Desc", "Location", "Unit", "Quantity"]].copy()
         result_df.rename(columns={"Quantity": update_dates["week 1"]}, inplace=True)
 
+        # 為其他週添加數據，確保所有欄位匹配
         for week in sorted_weeks:
             if week == "week 1":
                 continue
             df_week = dataframes[week]
             quantities = []
-            for desc in result_df["Desc"]:
-                matching_row = df_week[df_week["Desc"] == desc]
+            for _, row in result_df.iterrows():
+                matching_row = df_week[
+                    (df_week["Sub Group"] == row["Sub Group"]) &
+                    (df_week["Brand"] == row["Brand"]) &
+                    (df_week["Desc"] == row["Desc"]) &
+                    (df_week["Location"] == row["Location"]) &
+                    (df_week["Unit"] == row["Unit"])
+                ]
                 if not matching_row.empty:
                     quantities.append(matching_row["Quantity"].iloc[0])
                 else:
                     quantities.append(0)
             result_df[update_dates[week]] = quantities
 
+        # 計算每周變化
         for i in range(len(sorted_weeks) - 1):
             week_from = sorted_weeks[i]
             week_to = sorted_weeks[i + 1]
@@ -273,8 +281,14 @@ for week in sorted_weeks:
     df_week = dataframes[week]
     quantities = []
     locations = []
-    for desc in low_stock_df["Desc"]:
-        matching_rows = df_week[df_week["Desc"] == desc]
+    for _, row in low_stock_df.iterrows():
+        matching_rows = df_week[
+            (df_week["Sub Group"] == row["Sub Group"]) &
+            (df_week["Brand"] == row["Brand"]) &
+            (df_week["Desc"] == row["Desc"]) &
+            (df_week["Location"] == row["Location"]) &
+            (df_week["Unit"] == row["Unit"])
+        ]
         if not matching_rows.empty:
             qty = matching_rows["Quantity"].sum()
             quantities.append(qty)
@@ -313,37 +327,32 @@ low_stock_df["Last Week Usage"] = low_stock_df[usage_column].apply(lambda x: x i
 low_stock_df[update_dates["week 1"]] = low_stock_df[update_dates["week 1"]].fillna(0)
 low_stock_df["Last Week Usage"] = low_stock_df["Last Week Usage"].fillna(0)
 
-# 按 Description 合併數據
-grouped = low_stock_df.groupby("Desc").agg({
-    "Sub Group": "first",
-    "Brand": "first",
-    "Unit": "first",
+# 按所有欄位合併數據
+group_cols = ["Sub Group", "Brand", "Desc", "Location", "Unit"]
+grouped = low_stock_df.groupby(group_cols).agg({
     update_dates["week 1"]: "sum",
     "Last Week Usage": "sum",
-})
+}).reset_index()
 
+# 為其他週添加數據
 for week in sorted_weeks:
     if week == "week 1":
         continue
-    grouped[update_dates[week]] = low_stock_df.groupby("Desc")[update_dates[week]].sum()
-
-# 合併 Location 欄並轉換為簡寫
-def combine_locations(group):
-    all_locations = set()
-    for week in sorted_weeks:
-        if week == "week 1":
-            locs = group["Location"].tolist()
-            all_locations.update(locs)
+    df_week = dataframes[week]
+    quantities = []
+    for _, row in grouped.iterrows():
+        matching_rows = df_week[
+            (df_week["Sub Group"] == row["Sub Group"]) &
+            (df_week["Brand"] == row["Brand"]) &
+            (df_week["Desc"] == row["Desc"]) &
+            (df_week["Location"] == row["Location"]) &
+            (df_week["Unit"] == row["Unit"])
+        ]
+        if not matching_rows.empty:
+            quantities.append(matching_rows["Quantity"].sum())
         else:
-            locs_list = group[f"{week}_locations"].tolist()
-            for locs in locs_list:
-                if isinstance(locs, list):
-                    all_locations.update(locs)
-    all_locations.discard("")
-    abbreviated_locs = [LOCATION_ABBREVIATIONS.get(loc, loc) for loc in all_locations if loc]
-    return ", ".join(sorted(abbreviated_locs))
-
-grouped["Location"] = low_stock_df.groupby("Desc").apply(combine_locations)
+            quantities.append(0)
+    grouped[update_dates[week]] = quantities
 
 # 重新計算變化欄位
 for i in range(len(sorted_weeks) - 1):
@@ -353,8 +362,6 @@ for i in range(len(sorted_weeks) - 1):
     date_to = update_dates[week_to]
     change_column_name = f"{date_to.split('/')[0]}/{date_to.split('/')[1]}-{date_from.split('/')[0]}/{date_from.split('/')[1]}"
     grouped[change_column_name] = grouped[date_to] - grouped[date_from]
-
-grouped = grouped.reset_index()
 
 # 篩選缺貨產品：week 1 庫存低於用量
 low_stock = grouped[grouped[update_dates["week 1"]] < grouped["Last Week Usage"]]
