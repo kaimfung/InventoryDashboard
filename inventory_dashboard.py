@@ -3,7 +3,6 @@ import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
 import base64
-import time
 
 # 設定 Google Sheet 認證
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -199,7 +198,7 @@ st.text_input(
     on_change=update_inventory_search
 )
 
-# 直接使用 session_state 中的值進行搜尋，移除防抖機制
+# 直接使用 session_state 中的值進行搜尋
 search_term = st.session_state.inventory_search_term
 
 if search_term:
@@ -241,6 +240,11 @@ if search_term:
                 result_df[col] = pd.to_numeric(result_df[col], errors="coerce")
 
         result_df = result_df.sort_values(by=["Sub Group", "Brand", "Desc"])
+
+        # 重新排列欄位順序
+        desired_columns = ["Sub Group", "Brand", "Desc", "Location", "Unit"]
+        other_columns = [col for col in result_df.columns if col not in desired_columns]
+        result_df = result_df[desired_columns + other_columns]
 
         st.write("搜尋結果：")
         html_table = df_to_html_table(result_df, update_dates, sorted_weeks)
@@ -331,7 +335,6 @@ def combine_locations(group):
             locs = group["Location"].tolist()
             all_locations.update(locs)
         else:
-            # 直接處理列表，不使用 explode()
             locs_list = group[f"{week}_locations"].tolist()
             for locs in locs_list:
                 if isinstance(locs, list):
@@ -359,6 +362,11 @@ low_stock = grouped[grouped[update_dates["week 1"]] < grouped["Last Week Usage"]
 # 移除 Last Week Usage 欄位
 low_stock = low_stock.drop(columns=["Last Week Usage"])
 
+# 重新排列欄位順序
+desired_columns = ["Sub Group", "Brand", "Desc", "Location", "Unit"]
+other_columns = [col for col in low_stock.columns if col not in desired_columns]
+low_stock = low_stock[desired_columns + other_columns]
+
 # 添加搜尋功能
 st.write("搜尋缺貨產品：")
 st.text_input(
@@ -368,7 +376,7 @@ st.text_input(
     on_change=update_low_stock_search
 )
 
-# 直接使用 session_state 中的值進行搜尋，移除防抖機制
+# 直接使用 session_state 中的值進行搜尋
 low_stock_search_term = st.session_state.low_stock_search_term
 
 if not low_stock.empty:
