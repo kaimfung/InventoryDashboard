@@ -320,11 +320,10 @@ for col in low_stock_df.columns:
     if "-" in col:
         low_stock_df[col] = pd.to_numeric(low_stock_df[col], errors="coerce")
 
-# 計算用量（week 3 到 week 2 的用量）
-last_week = "week 3"
+# 計算用量（week 2 到 week 1 的變化，庫存減少表示用量）
+week1_date = update_dates["week 1"]
 week2_date = update_dates["week 2"]
-last_week_date = update_dates[last_week]
-usage_column = f"{last_week_date.split('/')[0]}/{last_week_date.split('/')[1]}-{week2_date.split('/')[0]}/{week2_date.split('/')[1]}"
+usage_column = f"{week2_date.split('/')[0]}/{week2_date.split('/')[1]}-{week1_date.split('/')[0]}/{week1_date.split('/')[1]}"
 low_stock_df["Last Week Usage"] = low_stock_df[usage_column].apply(lambda x: x if x > 0 else 0)
 
 # 處理 NaN 值
